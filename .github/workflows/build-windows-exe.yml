@@ -1,0 +1,39 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'click2count.py'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pymupdf Pillow openpyxl pyinstaller
+
+      - name: Build EXE
+        run: >
+          pyinstaller
+          --onefile
+          --windowed
+          --collect-all pymupdf
+          --name click2count
+          click2count.py
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: click2count-windows
+          path: dist/click2count.exe
+          retention-days: 30
