@@ -118,7 +118,7 @@ class PDFClickCounter:
         nav_frame.pack(side=tk.RIGHT, padx=4)
         tk.Button(nav_frame, text="◀", command=self.prev_page, **btn_cfg).pack(side=tk.LEFT, padx=2)
         self.page_label = tk.Label(nav_frame, text="—", bg="#181825",
-                                   fg="#313244", font=("Courier", 10), width=12)
+                                   fg="#a6adc8", font=("Courier", 10), width=12)
         self.page_label.pack(side=tk.LEFT, padx=4)
         tk.Button(nav_frame, text="▶", command=self.next_page, **btn_cfg).pack(side=tk.LEFT, padx=2)
 
@@ -136,8 +136,8 @@ class PDFClickCounter:
         self._file_menu.add_command(label="📊  Export Summary", command=self.export_summary)
 
         # Edit actions
-        tk.Button(toolbar, text="↩ Undo",  command=self.undo_click, **btn_cfg).pack(side=tk.LEFT, padx=2)
-        tk.Button(toolbar, text="🗑 Reset", command=self.reset_page, **btn_cfg).pack(side=tk.LEFT, padx=2)
+        tk.Button(toolbar, text="Undo",     command=self.undo_click,  **btn_cfg).pack(side=tk.LEFT, padx=2)
+        tk.Button(toolbar, text="Clear All", command=self.clear_all,  **btn_cfg).pack(side=tk.LEFT, padx=2)
 
         tk.Frame(toolbar, bg="#45475a", width=1).pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=3)
 
@@ -167,12 +167,13 @@ class PDFClickCounter:
 
         self.cat_color_swatch = tk.Label(toolbar, text="  ",
                                          bg=self.categories[0]["color"],
-                                         relief=tk.FLAT, width=2)
+                                         relief=tk.FLAT, width=2, cursor="hand2")
         self.cat_color_swatch.pack(side=tk.LEFT, padx=(2, 4))
+        self.cat_color_swatch.bind("<Button-1>", lambda _: self.change_category_color())
 
-        tk.Button(toolbar, text="＋",        command=self.add_category,         **btn_cfg).pack(side=tk.LEFT, padx=1)
-        tk.Button(toolbar, text="✎ Rename", command=self.rename_category,       **btn_cfg).pack(side=tk.LEFT, padx=1)
-        tk.Button(toolbar, text="🎨",       command=self.change_category_color, **btn_cfg).pack(side=tk.LEFT, padx=1)
+        tk.Button(toolbar, text="＋",        command=self.add_category,   **btn_cfg).pack(side=tk.LEFT, padx=1)
+        tk.Button(toolbar, text="✎ Rename", command=self.rename_category, **btn_cfg).pack(side=tk.LEFT, padx=1)
+        tk.Button(toolbar, text="🗑 Reset",  command=self.reset_page,      **btn_cfg).pack(side=tk.LEFT, padx=1)
 
         self._refresh_category_menu()
 
@@ -239,6 +240,7 @@ class PDFClickCounter:
 
         self.canvas.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
         self.canvas.bind("<Button-1>",           self.on_canvas_click)
+        self.canvas.bind("<Button-3>",           self._on_right_click)
         self.canvas.bind("<B1-Motion>",          self._on_b1_motion)
         self.canvas.bind("<Button-2>",           self._pan_start)
         self.canvas.bind("<B2-Motion>",          self._pan_move)
@@ -507,6 +509,12 @@ class PDFClickCounter:
         self.clicks.setdefault(self.current_category, {})[self.current_page] = []
         self.render_page()
 
+    def clear_all(self):
+        if not messagebox.askyesno("Clear All", "Clear all markers on all pages for all categories?"):
+            return
+        self.clicks = {i: {} for i in range(len(self.categories))}
+        self.render_page()
+
     def prev_page(self):
         if self.pdf_doc and self.current_page > 0:
             self.current_page -= 1
@@ -550,6 +558,9 @@ class PDFClickCounter:
         self.canvas.config(cursor="fleur" if held else "crosshair")
 
     def _pan_start(self, event):
+        if self.ruler_mode:
+            self.toggle_ruler_mode()
+            return
         self.canvas.scan_mark(event.x, event.y)
 
     def _pan_move(self, event):
@@ -558,6 +569,10 @@ class PDFClickCounter:
     def _on_b1_motion(self, event):
         if self._pan_key_held:
             self.canvas.scan_dragto(event.x, event.y, gain=1)
+
+    def _on_right_click(self, _):
+        if self.ruler_mode:
+            self.toggle_ruler_mode()
 
     # ── Ruler ─────────────────────────────────────────────────────────────────
 
@@ -600,6 +615,7 @@ class PDFClickCounter:
             )
             return
         self._apply_scale(n * self._PT_TO_M, ratio=n)
+        self.canvas.focus_set()
 
     def set_scale(self):
         if len(self.ruler_points) < 2:
