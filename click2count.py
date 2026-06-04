@@ -1107,7 +1107,7 @@ class PDFClickCounter:
             bg="#1e1e2e", fg="#a6adc8",
             font=("Courier", 11),
             justify=tk.CENTER,
-        ).pack(pady=(0, 12))
+        ).pack(pady=(0, 12)) 
 
         never_var = tk.BooleanVar(value=False)
 
