@@ -1,10 +1,10 @@
 """
-PDF Click Counter
+Click2Count
 -----------------
 A desktop tool for counting items on PDF building plans (or any PDF).
 
 Usage:
-    python pdf_click_counter.py
+    python click2count.py
 
 Requirements:
     pip install pymupdf Pillow
@@ -61,7 +61,7 @@ MARKER_ALPHA    = int(0.6 * 255)  # 153
 class PDFClickCounter:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("PDF Click Counter")
+        self.root.title("Click2Count by HDZ Electrical")
         self.root.geometry("1100x820")
         self.root.configure(bg="#1e1e2e")
 
@@ -85,6 +85,7 @@ class PDFClickCounter:
         self._marker_images: list = []
 
         self._pan_key_held: bool = False
+        self.pan_mode: bool = False
 
         # Ruler state
         self.ruler_mode: bool = False
@@ -134,10 +135,14 @@ class PDFClickCounter:
         self._file_menu.add_command(label="📂  Load Session",   command=self.load_session)
         self._file_menu.add_separator()
         self._file_menu.add_command(label="📊  Export Summary", command=self.export_summary)
+        self._file_menu.add_separator()
+        self._file_menu.add_command(label="ℹ️   About",          command=self._show_about)
 
-        # Edit actions
+        # Tool buttons
+        self.pan_btn = tk.Button(toolbar, text="✋", command=self.toggle_pan_mode, **btn_cfg)
+        self.pan_btn.pack(side=tk.LEFT, padx=2)
         tk.Button(toolbar, text="Undo",     command=self.undo_click,  **btn_cfg).pack(side=tk.LEFT, padx=2)
-        tk.Button(toolbar, text="Clear All", command=self.clear_all,  **btn_cfg).pack(side=tk.LEFT, padx=2)
+        tk.Button(toolbar, text="Clear page", command=self.clear_all,  **btn_cfg).pack(side=tk.LEFT, padx=2)
 
         tk.Frame(toolbar, bg="#45475a", width=1).pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=3)
 
@@ -152,6 +157,8 @@ class PDFClickCounter:
         # Ruler toggle icon (expands ruler bar below when active)
         self.ruler_btn = tk.Button(toolbar, text="📏", command=self.toggle_ruler_mode, **btn_cfg)
         self.ruler_btn.pack(side=tk.LEFT, padx=2)
+        self.marker_btn = tk.Button(toolbar, text="✏", command=self.activate_marker_mode, **btn_cfg)
+        self.marker_btn.pack(side=tk.LEFT, padx=2)
 
         tk.Frame(toolbar, bg="#45475a", width=1).pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=3)
 
@@ -219,10 +226,26 @@ class PDFClickCounter:
                  bg="#11111b", fg="#a6adc8",
                  font=("Courier", 10), anchor=tk.W).pack(side=tk.LEFT)
 
-        self.count_var = tk.StringVar(value="Total: 0")
-        tk.Label(status_bar, textvariable=self.count_var,
-                 bg="#11111b", fg="#a6e3a1",
-                 font=("Courier", 13, "bold")).pack(side=tk.RIGHT)
+        self.grand_total_var = tk.StringVar(value="All: 0")
+        tk.Label(status_bar, textvariable=self.grand_total_var,
+                 bg="#11111b", fg="#EAF6AD",
+                 font=("Courier", 12, "bold")).pack(side=tk.RIGHT, padx=(8, 0))
+
+        tk.Label(status_bar, text="·", bg="#11111b", fg="#45475a",
+                 font=("Courier", 10)).pack(side=tk.LEFT, padx=4)
+
+        self.cat_total_var = tk.StringVar(value="Cat: 0")
+        tk.Label(status_bar, textvariable=self.cat_total_var,
+                 bg="#11111b", fg="#a6adc8",
+                 font=("Courier", 10)).pack(side=tk.LEFT)
+
+        tk.Label(status_bar, text="·", bg="#11111b", fg="#45475a",
+                 font=("Courier", 10)).pack(side=tk.LEFT, padx=4)
+
+        self.cat_page_var = tk.StringVar(value="Page: 0")
+        tk.Label(status_bar, textvariable=self.cat_page_var,
+                 bg="#11111b", fg="#a6adc8",
+                 font=("Courier", 10)).pack(side=tk.LEFT)
 
         # ── Scrollable canvas ─────────────────────────────────────────────────
         canvas_frame = tk.Frame(self.root, bg="#1e1e2e")
@@ -264,6 +287,23 @@ class PDFClickCounter:
     def _show_file_menu(self):
         btn = self._menu_btn
         self._file_menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+
+    def _show_about(self):
+        messagebox.showinfo(
+            "About Click2Count",
+            "Click2Count\n"
+            "Developed by Polina February & Claude (Anthropic)\n"
+            "Concept & feedback by HDZ Electrical\n"
+            "\n"
+            "A desktop tool for counting items on PDF\n"
+            "building plans and drawings.\n"
+            "\n"
+            "• Click to place numbered markers\n"
+            "• Multiple colour-coded categories\n"
+            "• Zoom and pan freely\n"
+            "• Measure distances with the Ruler\n"
+            "• Save/load sessions, export to Excel\n"
+        )
 
     # ── Category management ───────────────────────────────────────────────────
 
@@ -337,6 +377,10 @@ class PDFClickCounter:
         self.clicks       = {i: {} for i in range(len(self.categories))}
         self.root.title(f"PDF Click Counter — {os.path.basename(path)}")
         self.render_page()
+        if not self.pan_mode:
+            self.toggle_pan_mode()
+        else:
+            self._refresh_tool_buttons()
 
     def render_page(self):
         if self.pdf_doc is None:
@@ -432,7 +476,7 @@ class PDFClickCounter:
         if self.pdf_doc is None:
             return
 
-        if self._pan_key_held:
+        if self._pan_key_held or self.pan_mode:
             self.canvas.scan_mark(event.x, event.y)
             return
 
@@ -475,21 +519,18 @@ class PDFClickCounter:
         self._update_status()
 
     def _update_status(self):
-        n_pages    = len(self.pdf_doc) if self.pdf_doc else 0
-        page_count = len(self.clicks.get(self.current_category, {}).get(self.current_page, []))
-        total      = sum(
-            len(pg) for cat in self.clicks.values() for pg in cat.values()
-        )
-        cat_name = self.categories[self.current_category]["name"]
+        n_pages       = len(self.pdf_doc) if self.pdf_doc else 0
+        cat_name      = self.categories[self.current_category]["name"]
+        cat_page_count = len(self.clicks.get(self.current_category, {}).get(self.current_page, []))
+        cat_total     = sum(len(pg) for pg in self.clicks.get(self.current_category, {}).values())
+        grand_total   = sum(len(pg) for cat in self.clicks.values() for pg in cat.values())
 
         self.page_label.config(text=f"Page {self.current_page + 1} / {n_pages}")
-        self.count_var.set(f"Total: {total}")
+        self.cat_page_var.set(f"Page: {cat_page_count}")
+        self.cat_total_var.set(f"{cat_name} total: {cat_total}")
+        self.grand_total_var.set(f"Total: {grand_total}")
         mode = "📏 RULER" if self.ruler_mode else f"[{cat_name}]"
-        self.status_var.set(
-            f"{mode}  page count: {page_count}  |  "
-            f"all categories total: {total}  |  "
-            f"zoom: {self.zoom:.1f}×"
-        )
+        self.status_var.set(f"{mode}  zoom: {self.zoom:.1f}×")
 
     # ── Controls ──────────────────────────────────────────────────────────────
 
@@ -510,9 +551,10 @@ class PDFClickCounter:
         self.render_page()
 
     def clear_all(self):
-        if not messagebox.askyesno("Clear All", "Clear all markers on all pages for all categories?"):
+        if not messagebox.askyesno("Clear", "Clear all markers on this page for all categories?"):
             return
-        self.clicks = {i: {} for i in range(len(self.categories))}
+        for cat_idx in self.clicks:
+            self.clicks[cat_idx].pop(self.current_page, None)
         self.render_page()
 
     def prev_page(self):
@@ -553,9 +595,43 @@ class PDFClickCounter:
 
     # ── Pan (middle-click drag  or  D + left-click drag) ──────────────────────
 
+    def activate_marker_mode(self):
+        if self.pan_mode:
+            self.pan_mode = False
+        if self.ruler_mode:
+            self.ruler_mode = False
+            self.ruler_btn.config(relief=tk.FLAT, bg="#313244")
+            self.ruler_bar.pack_forget()
+        self.canvas.config(cursor="crosshair")
+        self._refresh_tool_buttons()
+
+    def _refresh_tool_buttons(self):
+        marker_active = not self.pan_mode and not self.ruler_mode
+        self.marker_btn.config(
+            relief=tk.SUNKEN if marker_active else tk.FLAT,
+            bg="#45475a" if marker_active else "#313244",
+        )
+        self.pan_btn.config(
+            relief=tk.SUNKEN if self.pan_mode else tk.FLAT,
+            bg="#45475a" if self.pan_mode else "#313244",
+        )
+        self.ruler_btn.config(
+            relief=tk.SUNKEN if self.ruler_mode else tk.FLAT,
+            bg="#45475a" if self.ruler_mode else "#313244",
+        )
+
+    def toggle_pan_mode(self):
+        self.pan_mode = not self.pan_mode
+        if self.pan_mode and self.ruler_mode:
+            self.ruler_mode = False
+            self.ruler_bar.pack_forget()
+        self.canvas.config(cursor="fleur" if self.pan_mode else "crosshair")
+        self._refresh_tool_buttons()
+
     def _set_pan_key(self, held: bool):
         self._pan_key_held = held
-        self.canvas.config(cursor="fleur" if held else "crosshair")
+        if not self.pan_mode:
+            self.canvas.config(cursor="fleur" if held else "crosshair")
 
     def _pan_start(self, event):
         if self.ruler_mode:
@@ -567,25 +643,29 @@ class PDFClickCounter:
         self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_b1_motion(self, event):
-        if self._pan_key_held:
+        if self._pan_key_held or self.pan_mode:
             self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_right_click(self, _):
         if self.ruler_mode:
             self.toggle_ruler_mode()
+        elif self.pan_mode:
+            self.toggle_pan_mode()
 
     # ── Ruler ─────────────────────────────────────────────────────────────────
 
     def toggle_ruler_mode(self):
         self.ruler_mode = not self.ruler_mode
         if self.ruler_mode:
-            self.ruler_btn.config(relief=tk.SUNKEN, bg="#45475a")
+            if self.pan_mode:
+                self.pan_mode = False
             self.ruler_bar.pack(side=tk.TOP, fill=tk.X)
+            self.canvas.config(cursor="crosshair")
             self.status_var.set("Ruler mode: click two points to measure distance.")
         else:
-            self.ruler_btn.config(relief=tk.FLAT, bg="#313244")
             self.ruler_bar.pack_forget()
             self._update_status()
+        self._refresh_tool_buttons()
 
     def clear_ruler(self):
         self.ruler_points.clear()
@@ -920,11 +1000,18 @@ class PDFClickCounter:
         if self.pdf_doc:
             self.root.title(f"PDF Click Counter — {os.path.basename(pdf_path)}")
             self.render_page()
+            if not self.pan_mode:
+                self.toggle_pan_mode()
 
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     root = tk.Tk()
+    try:
+        icon = tk.PhotoImage(file=os.path.join(os.path.dirname(__file__), "icon.png"))
+        root.iconphoto(True, icon)
+    except Exception:
+        pass
     app  = PDFClickCounter(root)
     root.mainloop()

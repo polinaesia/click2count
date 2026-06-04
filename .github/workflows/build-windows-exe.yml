@@ -34,6 +34,8 @@ jobs:
           --onedir
           --windowed
           --collect-all pymupdf
+          --add-data "icon.png;."
+          --icon icon.ico
           --name click2count
           click2count.py
 
@@ -49,19 +51,19 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub Release
-        uses: ncipollo/release-action@v1
-        with:
-          artifacts: click2count-windows.zip
-          tag: latest
-          name: Latest Build
-          body: |
-            ## How to install
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release delete latest --yes 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+          gh release create latest click2count-windows.zip \
+            --title "Latest Build" \
+            --notes "## How to install
 
-            1. Download **click2count-windows.zip** below
-            2. Unzip it anywhere (e.g. your Desktop)
-            3. Open the `click2count` folder and double-click **click2count.exe**
+          1. Download **click2count-windows.zip** below
+          2. Unzip it anywhere (e.g. your Desktop)
+          3. Open the \`click2count\` folder and double-click **click2count.exe**
 
-            No Python required.
-          allowUpdates: true
-          removeArtifacts: true
-          makeLatest: true
+          No Python required." \
+            --latest

@@ -1,25 +1,29 @@
-# PDF Click Counter
+# Click2Count
 
 A lightweight desktop tool for counting and categorising items on PDF building plans — or any PDF document. Built with Python and tkinter.
+
+Developed by **Polina February** & **Claude** (Anthropic)
+Concept & feedback by **HDZ Electrical**
 
 ---
 
 ## Features
 
+- **Pan & Marker tools** — open a plan, explore it with Pan, then switch to Marker mode to start counting
 - **Click to count** — click anywhere on the PDF to place a numbered marker
 - **Categories** — create multiple named categories, each with a unique colour; markers from all categories are visible at the same time
 - **Ruler tool** — measure distances between two points; set a plan scale (e.g. `1:200`) to get results in metres
 - **Zoom** — zoom in/out with buttons or `Ctrl + scroll`; markers stay anchored to their exact position in the PDF
 - **Multi-page** — navigate pages with arrow buttons or keyboard; per-category counts run continuously across all pages
 - **Undo / Reset** — undo the last marker or clear all markers on the current page (per category)
+- **Save / Load session** — save your work as a `.c2c` file and continue later
 - **Export** — save a summary as `.xlsx`, `.txt`, or `.json`
 
 ---
 
 ## Screenshots
 
-> _(add screenshots here)_
-
+![Screenshot of the default screen in Click2Count by HDZ](./Screenshots/default_screen.png)
 ---
 
 ## Installation
@@ -35,18 +39,20 @@ pip install pymupdf Pillow openpyxl
 **Run:**
 
 ```bash
-python pdf_click_counter.py
+python click2count.py
 ```
 
 ---
 
 ## Usage
 
-### Counting
+### Basic workflow
 
-1. Click **☰ → Open PDF** to load a file
-2. Click anywhere on the plan to place a numbered marker
-3. Use **↩ Undo** to remove the last marker, or **🗑 Reset** to clear the current page
+1. Click **☰ → Open PDF** to load a file — the view opens in **Pan mode** automatically
+2. Pan around the plan to orient yourself
+3. Click **✏ Marker** in the toolbar to switch to counting mode
+4. Click anywhere on the plan to place numbered markers
+5. Right-click to exit the active tool at any time
 
 ### Categories
 
@@ -58,6 +64,15 @@ python pdf_click_counter.py
 
 Switch the active category from the dropdown — new clicks go to the selected category. All category markers are shown on screen simultaneously.
 
+### Tools
+
+| Tool | How to activate |
+|------|----------------|
+| **✏** | Click the Marker button — left-click places markers |
+| **✋** | Click the Pan button, or hold `D` + drag (temporary), or middle-click drag |
+| **📏** | Click the Ruler button — a second toolbar row appears |
+| Exit any tool | **Right-click** |
+
 ### Ruler
 
 1. Click **📏** in the toolbar to enter ruler mode (a second toolbar row appears)
@@ -66,7 +81,7 @@ Switch the active category from the dropdown — new clicks go to the selected c
    - Type the plan denominator in the **Scale 1:** field (e.g. `200` for a 1:200 plan) and press **Apply** or Enter
    - Click **⚖ Set Scale** and enter the real-world length of the drawn line in metres
 4. The measurement updates to metres once a scale is set
-5. Click **📏** again to close the ruler toolbar; click **✕ Clear** to remove the line
+5. Click **📏** again or right-click to close ruler mode; click **✕ Clear** to remove the line
 
 ### Export
 
@@ -85,6 +100,7 @@ Click **☰ → Export Summary** and choose a format:
 | `←` / `→` | Previous / next page |
 | `z` | Undo last click |
 | `+` / `-` | Zoom in / out |
+| `D` (hold) | Temporary pan mode |
 | `Ctrl + scroll` | Zoom in / out with mouse or trackpad |
 
 ---
@@ -99,6 +115,9 @@ Click **☰ → Export Summary** and choose a format:
 
 ---
 
-## License
+## Credits
 
-MIT
+Built by Polina February & Claude (Anthropic)
+Concept & feedback by HDZ Electrical
+
+© HDZ Electrical. All rights reserved.
