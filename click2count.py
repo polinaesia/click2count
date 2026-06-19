@@ -89,6 +89,9 @@ class PDFClickCounter:
 
         self._pan_key_held: bool = False
         self.pan_mode: bool = False
+        self.erase_mode: bool = False
+        self.move_mode: bool = False
+        self._move_target: tuple | None = None  # (cat_idx, page_idx, click_idx)
 
         # Ruler state
         self.ruler_mode: bool = False
@@ -163,6 +166,10 @@ class PDFClickCounter:
         self.ruler_btn.pack(side=tk.LEFT, padx=2)
         self.marker_btn = tk.Button(toolbar, text="🔢", command=self.activate_marker_mode, **btn_cfg)
         self.marker_btn.pack(side=tk.LEFT, padx=2)
+        self.erase_btn = tk.Button(toolbar, text="✕ Erase", command=self.toggle_erase_mode, **btn_cfg)
+        self.erase_btn.pack(side=tk.LEFT, padx=2)
+        self.move_btn = tk.Button(toolbar, text="↔ Move", command=self.toggle_move_mode, **btn_cfg)
+        self.move_btn.pack(side=tk.LEFT, padx=2)
 
         tk.Frame(toolbar, bg="#45475a", width=1).pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=3)
 
@@ -273,6 +280,7 @@ class PDFClickCounter:
         self.canvas.bind("<Button-1>",           self.on_canvas_click)
         self.canvas.bind("<Button-3>",           self._on_right_click)
         self.canvas.bind("<B1-Motion>",          self._on_b1_motion)
+        self.canvas.bind("<ButtonRelease-1>",    self._on_b1_release)
         self.canvas.bind("<Button-2>",           self._pan_start)
         self.canvas.bind("<B2-Motion>",          self._pan_move)
         self.canvas.bind("<MouseWheel>",         self._on_mousewheel)
@@ -451,10 +459,12 @@ class PDFClickCounter:
             cat_clicks = self.clicks.get(cat_idx, {})
             prior = sum(len(cat_clicks.get(pg, [])) for pg in range(self.current_page))
             page_clicks = cat_clicks.get(self.current_page, [])
-            for seq, (pdf_x, pdf_y) in enumerate(page_clicks, prior + 1):
+            for local_idx, (pdf_x, pdf_y) in enumerate(page_clicks):
+                seq = prior + local_idx + 1
                 cx = pdf_x * self.zoom + self.page_offset_x
                 cy = pdf_y * self.zoom + self.page_offset_y
-                self._draw_marker(cx, cy, seq, cat["color"])
+                selected = self._move_target == (cat_idx, self.current_page, local_idx)
+                self._draw_marker(cx, cy, seq, cat["color"], selected=selected)
 
         self._draw_ruler()
         self._update_status()
@@ -463,15 +473,16 @@ class PDFClickCounter:
         h = hex_color.lstrip("#")
         return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
-    def _draw_marker(self, cx: float, cy: float, number: int, color: str):
+    def _draw_marker(self, cx: float, cy: float, number: int, color: str, selected: bool = False):
         r    = MARKER_RADIUS
         size = r * 2 + 4        # 44px for radius=20
         rgb  = self._hex_to_rgb(color)
 
         img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
+        fill_alpha = int(0.2 * 255) if selected else MARKER_ALPHA
         draw.ellipse([2, 2, size - 2, size - 2],
-                     fill=(*rgb, MARKER_ALPHA),
+                     fill=(*rgb, fill_alpha),
                      outline=(255, 255, 255, 200),
                      width=2)
 
@@ -533,6 +544,27 @@ class PDFClickCounter:
             self.render_page()
             return
 
+        # ── Erase mode ────────────────────────────────────────────────────────
+        if self.erase_mode:
+            hit = self._find_nearest_marker(cx, cy)
+            if hit:
+                cat_idx, pg, idx = hit
+                self.clicks[cat_idx][pg].pop(idx)
+                self.render_page()
+            else:
+                self.status_var.set("No marker found here — click directly on a marker to erase it.")
+            return
+
+        # ── Move mode — select on press; drag/release handled by motion binding ─
+        if self.move_mode:
+            hit = self._find_nearest_marker(cx, cy)
+            if hit:
+                self._move_target = hit
+                self._redraw_markers_only()
+            else:
+                self.status_var.set("No marker found — click and drag a marker to reposition it.")
+            return
+
         # Distance guard across ALL categories (avoid stacking markers)
         for cat_idx in range(len(self.categories)):
             for (ex, ey) in self.clicks.get(cat_idx, {}).get(self.current_page, []):
@@ -566,7 +598,15 @@ class PDFClickCounter:
         self.cat_page_var.set(f"Page: {cat_page_count}")
         self.cat_total_var.set(f"{cat_name} total: {cat_total}")
         self.grand_total_var.set(f"Total: {grand_total}")
-        mode = "📏 RULER" if self.ruler_mode else f"[{cat_name}]"
+        if self.ruler_mode:
+            mode = "📏 RULER"
+        elif self.erase_mode:
+            mode = "✕ ERASE — click a marker to delete"
+        elif self.move_mode:
+            mode = ("↔ MOVE — dragging…" if self._move_target is not None
+                    else "↔ MOVE — click and drag a marker")
+        else:
+            mode = f"[{cat_name}]"
         self.status_var.set(f"{mode}  zoom: {self.zoom:.1f}×")
 
     # ── Controls ──────────────────────────────────────────────────────────────
@@ -647,17 +687,19 @@ class PDFClickCounter:
     # ── Pan (middle-click drag  or  D + left-click drag) ──────────────────────
 
     def activate_marker_mode(self):
-        if self.pan_mode:
-            self.pan_mode = False
+        self.pan_mode   = False
+        self.erase_mode = False
+        if self.move_mode:
+            self.move_mode    = False
+            self._move_target = None
         if self.ruler_mode:
             self.ruler_mode = False
-            self.ruler_btn.config(relief=tk.FLAT, bg="#313244")
             self.ruler_bar.pack_forget()
-        self.canvas.config(cursor="crosshair")
+        self.canvas.config(cursor="target")
         self._refresh_tool_buttons()
 
     def _refresh_tool_buttons(self):
-        marker_active = not self.pan_mode and not self.ruler_mode
+        marker_active = not self.pan_mode and not self.ruler_mode and not self.erase_mode and not self.move_mode
         self.marker_btn.config(
             relief=tk.SUNKEN if marker_active else tk.FLAT,
             bg="#45475a" if marker_active else "#313244",
@@ -669,6 +711,14 @@ class PDFClickCounter:
         self.ruler_btn.config(
             relief=tk.SUNKEN if self.ruler_mode else tk.FLAT,
             bg="#45475a" if self.ruler_mode else "#313244",
+        )
+        self.erase_btn.config(
+            relief=tk.SUNKEN if self.erase_mode else tk.FLAT,
+            bg="#45475a" if self.erase_mode else "#313244",
+        )
+        self.move_btn.config(
+            relief=tk.SUNKEN if self.move_mode else tk.FLAT,
+            bg="#45475a" if self.move_mode else "#313244",
         )
 
     def toggle_pan_mode(self):
@@ -694,14 +744,98 @@ class PDFClickCounter:
         self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_b1_motion(self, event):
+        if self.move_mode and self._move_target is not None:
+            cx = self.canvas.canvasx(event.x)
+            cy = self.canvas.canvasy(event.y)
+            cat_idx, pg, idx = self._move_target
+            self.clicks[cat_idx][pg][idx] = (
+                (cx - self.page_offset_x) / self.zoom,
+                (cy - self.page_offset_y) / self.zoom,
+            )
+            self._redraw_markers_only()
+            return
         if self._pan_key_held or self.pan_mode:
             self.canvas.scan_dragto(event.x, event.y, gain=1)
+
+    def _on_b1_release(self, _):
+        if self.move_mode and self._move_target is not None:
+            self._move_target = None
+            self._redraw_markers_only()   # clear the yellow highlight
+
+    def _redraw_markers_only(self):
+        """Redraw markers (and ruler) without re-rendering the PDF — fast enough for drag."""
+        self.canvas.delete("marker")
+        self.canvas.delete("ruler")
+        self._marker_images.clear()
+        for cat_idx, cat in enumerate(self.categories):
+            cat_clicks = self.clicks.get(cat_idx, {})
+            prior = sum(len(cat_clicks.get(pg, [])) for pg in range(self.current_page))
+            page_clicks = cat_clicks.get(self.current_page, [])
+            for local_idx, (pdf_x, pdf_y) in enumerate(page_clicks):
+                seq = prior + local_idx + 1
+                cx = pdf_x * self.zoom + self.page_offset_x
+                cy = pdf_y * self.zoom + self.page_offset_y
+                selected = self._move_target == (cat_idx, self.current_page, local_idx)
+                self._draw_marker(cx, cy, seq, cat["color"], selected=selected)
+        self._draw_ruler()
+        self._update_status()
 
     def _on_right_click(self, _):
         if self.ruler_mode:
             self.toggle_ruler_mode()
+        elif self.erase_mode:
+            self.toggle_erase_mode()
+        elif self.move_mode:
+            self._move_target = None
+            self.toggle_move_mode()
         elif self.pan_mode:
             self.toggle_pan_mode()
+
+    # ── Erase / Move helpers ──────────────────────────────────────────────────
+
+    def _find_nearest_marker(self, cx: float, cy: float, hit_radius: float = MARKER_RADIUS + 5):
+        """Return (cat_idx, page_idx, click_idx) of the closest marker within hit_radius, or None."""
+        best      = None
+        best_dist = hit_radius
+        for cat_idx in range(len(self.categories)):
+            for local_idx, (ex, ey) in enumerate(
+                self.clicks.get(cat_idx, {}).get(self.current_page, [])
+            ):
+                mx = ex * self.zoom + self.page_offset_x
+                my = ey * self.zoom + self.page_offset_y
+                dist = math.hypot(cx - mx, cy - my)
+                if dist < best_dist:
+                    best_dist = dist
+                    best = (cat_idx, self.current_page, local_idx)
+        return best
+
+    def toggle_erase_mode(self):
+        self.erase_mode = not self.erase_mode
+        if self.erase_mode:
+            self.pan_mode  = False
+            self.move_mode = False
+            self._move_target = None
+            if self.ruler_mode:
+                self.ruler_mode = False
+                self.ruler_bar.pack_forget()
+            self.canvas.config(cursor="X_cursor")
+        self._refresh_tool_buttons()
+        self._update_status()
+
+    def toggle_move_mode(self):
+        self.move_mode = not self.move_mode
+        if self.move_mode:
+            self.pan_mode   = False
+            self.erase_mode = False
+            if self.ruler_mode:
+                self.ruler_mode = False
+                self.ruler_bar.pack_forget()
+            self.canvas.config(cursor="center_ptr")
+        else:
+            self._move_target = None
+            self.render_page()
+        self._refresh_tool_buttons()
+        self._update_status()
 
     # ── Ruler ─────────────────────────────────────────────────────────────────
 
