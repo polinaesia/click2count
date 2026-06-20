@@ -45,7 +45,6 @@ except ImportError:
 
 try:
     import openpyxl
-    from openpyxl.styles import PatternFill
     _XLSX_AVAILABLE = True
 except ImportError:
     _XLSX_AVAILABLE = False
@@ -140,9 +139,10 @@ class PDFClickCounter:
         self._file_menu.add_command(label="💾  Save Session",   command=self.save_session)
         self._file_menu.add_command(label="📂  Load Session",   command=self.load_session)
         self._file_menu.add_separator()
-        self._file_menu.add_command(label="📊  Export Summary", command=self.export_summary)
+        self._file_menu.add_command(label="📊  Export Summary",    command=self.export_summary)
+        self._file_menu.add_command(label="📄  Export Marked PDF", command=self.export_marked_pdf)
         self._file_menu.add_separator()
-        self._file_menu.add_command(label="ℹ️   About",          command=self._show_about)
+        self._file_menu.add_command(label="ℹ️   About",             command=self._show_about)
 
         # Tool buttons
         self.pan_btn = tk.Button(toolbar, text="✋", command=self.toggle_pan_mode, **btn_cfg)
@@ -991,7 +991,7 @@ class PDFClickCounter:
                 messagebox.showerror("Missing library",
                                      "Install openpyxl first:\n    pip install openpyxl")
                 return
-            self._export_xlsx(save_path, total)
+            self._export_xlsx(save_path)
 
         elif save_path.endswith(".json"):
             data = {
@@ -1036,7 +1036,7 @@ class PDFClickCounter:
 
         messagebox.showinfo("Export", f"Summary saved to:\n{save_path}")
 
-    def _export_xlsx(self, path: str, grand_total: int):
+    def _export_xlsx(self, path: str):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Summary"
@@ -1049,45 +1049,108 @@ class PDFClickCounter:
             if coords
         })
 
-        # ── Header row (plain text, no fill) ─────────────────────────────────
-        headers = ["Category"] + [f"Page {pg + 1}" for pg in all_pages] + ["Total"]
+        # ── Header row ───────────────────────────────────────────────────────
+        headers = ["Category"] + [f"Page {pg + 1}" for pg in all_pages]
         for col, title in enumerate(headers, 1):
             ws.cell(row=1, column=col, value=title)
 
         # ── One row per category ──────────────────────────────────────────────
         for row_idx, (i, cat) in enumerate(enumerate(self.categories), 2):
             cat_clicks = self.clicks.get(i, {})
-            cat_total  = sum(len(v) for v in cat_clicks.values())
-
-            # Only the category name cell gets the category background colour
-            name_cell      = ws.cell(row=row_idx, column=1, value=cat["name"])
-            name_cell.fill = PatternFill("solid", fgColor=cat["color"].lstrip("#"))
-
+            ws.cell(row=row_idx, column=1, value=cat["name"])
             for col_idx, pg in enumerate(all_pages, 2):
                 ws.cell(row=row_idx, column=col_idx, value=len(cat_clicks.get(pg, [])))
-
-            ws.cell(row=row_idx, column=len(all_pages) + 2, value=cat_total)
-
-        # ── Grand total row (plain text, no fill) ─────────────────────────────
-        total_row = len(self.categories) + 2
-        ws.cell(row=total_row, column=1, value="TOTAL")
-
-        for col_idx, pg in enumerate(all_pages, 2):
-            ws.cell(row=total_row, column=col_idx, value=sum(
-                len(self.clicks.get(i, {}).get(pg, []))
-                for i in range(len(self.categories))
-            ))
-
-        ws.cell(row=total_row, column=len(all_pages) + 2, value=grand_total)
 
         # ── Column widths ────────────────────────────────────────────────────
         ws.column_dimensions["A"].width = max(
             14, max((len(c["name"]) for c in self.categories), default=10) + 2
         )
-        for col_idx in range(2, len(all_pages) + 3):
+        for col_idx in range(2, len(all_pages) + 2):
             ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 10
 
         wb.save(path)
+
+    def export_marked_pdf(self):
+        if self.pdf_doc is None or not self.pdf_path:
+            messagebox.showinfo("Export Marked PDF", "No PDF is open.")
+            return
+        has_clicks = any(
+            len(pg) > 0
+            for cat in self.clicks.values()
+            for pg in cat.values()
+        )
+        if not has_clicks:
+            messagebox.showinfo("Export Marked PDF", "No markers to export.")
+            return
+
+        base = os.path.splitext(os.path.basename(self.pdf_path))[0]
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF file", "*.pdf"), ("All files", "*.*")],
+            title="Export Marked PDF",
+            initialfile=f"{base}_marked",
+        )
+        if not save_path:
+            return
+
+        try:
+            out_doc = fitz.open(self.pdf_path)
+        except Exception as exc:
+            messagebox.showerror("Export Error", f"Could not open source PDF:\n{exc}")
+            return
+
+        # Marker radius in PDF points (undo the screen zoom used when placing)
+        radius_pt = MARKER_RADIUS / DEFAULT_ZOOM
+        text_size = max(5, int(radius_pt * 0.85))
+
+        for page_idx in range(len(out_doc)):
+            page  = out_doc[page_idx]
+            shape = page.new_shape()
+
+            for cat_idx, cat in enumerate(self.categories):
+                cat_clicks = self.clicks.get(cat_idx, {})
+                prior      = sum(len(cat_clicks.get(pg, [])) for pg in range(page_idx))
+                page_clicks = cat_clicks.get(page_idx, [])
+                r, g, b    = self._hex_to_rgb(cat["color"])
+                fill_col   = (r / 255, g / 255, b / 255)
+
+                for local_idx, (pdf_x, pdf_y) in enumerate(page_clicks):
+                    shape.draw_circle(fitz.Point(pdf_x, pdf_y), radius_pt)
+                    shape.finish(
+                        color=(1, 1, 1),
+                        fill=fill_col,
+                        fill_opacity=0.6,
+                        width=0.8,
+                    )
+
+            shape.commit()
+
+            # Sequence numbers drawn on top of the circles
+            for cat_idx, cat in enumerate(self.categories):
+                cat_clicks  = self.clicks.get(cat_idx, {})
+                prior       = sum(len(cat_clicks.get(pg, [])) for pg in range(page_idx))
+                page_clicks = cat_clicks.get(page_idx, [])
+
+                for local_idx, (pdf_x, pdf_y) in enumerate(page_clicks):
+                    seq  = prior + local_idx + 1
+                    rect = fitz.Rect(
+                        pdf_x - radius_pt, pdf_y - radius_pt,
+                        pdf_x + radius_pt, pdf_y + radius_pt,
+                    )
+                    page.insert_textbox(
+                        rect, str(seq),
+                        fontsize=text_size,
+                        color=(1, 1, 1),
+                        align=fitz.TEXT_ALIGN_CENTER,
+                    )
+
+        try:
+            out_doc.save(save_path, garbage=3, deflate=True)
+            messagebox.showinfo("Export Marked PDF", f"Saved to:\n{save_path}")
+        except Exception as exc:
+            messagebox.showerror("Export Error", f"Could not save PDF:\n{exc}")
+        finally:
+            out_doc.close()
 
     # ── Session save / load ───────────────────────────────────────────────────
 
