@@ -1050,8 +1050,10 @@ class PDFClickCounter:
             if coords
         })
 
+        total_col = len(all_pages) + 2  # column index for the Total column
+
         # ── Header row ───────────────────────────────────────────────────────
-        headers = ["Category"] + [f"Page {pg + 1}" for pg in all_pages]
+        headers = ["Category"] + [f"Page {pg + 1}" for pg in all_pages] + ["Total"]
         for col, title in enumerate(headers, 1):
             ws.cell(row=1, column=col, value=title)
 
@@ -1061,12 +1063,14 @@ class PDFClickCounter:
             ws.cell(row=row_idx, column=1, value=cat["name"])
             for col_idx, pg in enumerate(all_pages, 2):
                 ws.cell(row=row_idx, column=col_idx, value=len(cat_clicks.get(pg, [])))
+            ws.cell(row=row_idx, column=total_col,
+                    value=sum(len(v) for v in cat_clicks.values()))
 
         # ── Column widths ────────────────────────────────────────────────────
         ws.column_dimensions["A"].width = max(
             14, max((len(c["name"]) for c in self.categories), default=10) + 2
         )
-        for col_idx in range(2, len(all_pages) + 2):
+        for col_idx in range(2, total_col + 1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 10
 
         wb.save(path)
