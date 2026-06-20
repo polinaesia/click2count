@@ -27,6 +27,7 @@ from tkinter import filedialog, messagebox, colorchooser, simpledialog, ttk
 import math
 import json
 import os
+import sys
 import webbrowser
 
 try:
@@ -140,7 +141,7 @@ class PDFClickCounter:
         self._file_menu.add_command(label="📂  Load Session",   command=self.load_session)
         self._file_menu.add_separator()
         self._file_menu.add_command(label="📊  Export Summary",    command=self.export_summary)
-        self._file_menu.add_command(label="📄  Export Marked PDF", command=self.export_marked_pdf)
+        self._file_menu.add_command(label="📄  Export PDF", command=self.export_marked_pdf)
         self._file_menu.add_separator()
         self._file_menu.add_command(label="ℹ️   About",             command=self._show_about)
 
@@ -1345,9 +1346,17 @@ class PDFClickCounter:
 
 if __name__ == "__main__":
     root = tk.Tk()
+    _dir = os.path.dirname(os.path.abspath(__file__))
     try:
-        icon = tk.PhotoImage(file=os.path.join(os.path.dirname(__file__), "icon.png"))
-        root.iconphoto(True, icon)
+        if sys.platform == "win32":
+            ico_path = os.path.join(_dir, "icon.ico")
+            if os.path.isfile(ico_path):
+                root.iconbitmap(ico_path)
+        else:
+            png_path = os.path.join(_dir, "icon.png")
+            if os.path.isfile(png_path):
+                _icon = tk.PhotoImage(file=png_path)
+                root.iconphoto(True, _icon)
     except Exception:
         pass
     app  = PDFClickCounter(root)
