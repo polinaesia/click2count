@@ -1106,20 +1106,18 @@ class PDFClickCounter:
 
         # Marker radius in PDF points (undo the screen zoom used when placing)
         radius_pt = MARKER_RADIUS / DEFAULT_ZOOM
-        text_size = max(5, int(radius_pt * 0.85))
 
         for page_idx in range(len(out_doc)):
             page  = out_doc[page_idx]
             shape = page.new_shape()
 
             for cat_idx, cat in enumerate(self.categories):
-                cat_clicks = self.clicks.get(cat_idx, {})
-                prior      = sum(len(cat_clicks.get(pg, [])) for pg in range(page_idx))
+                cat_clicks  = self.clicks.get(cat_idx, {})
                 page_clicks = cat_clicks.get(page_idx, [])
-                r, g, b    = self._hex_to_rgb(cat["color"])
-                fill_col   = (r / 255, g / 255, b / 255)
+                r, g, b     = self._hex_to_rgb(cat["color"])
+                fill_col    = (r / 255, g / 255, b / 255)
 
-                for local_idx, (pdf_x, pdf_y) in enumerate(page_clicks):
+                for (pdf_x, pdf_y) in page_clicks:
                     shape.draw_circle(fitz.Point(pdf_x, pdf_y), radius_pt)
                     shape.finish(
                         color=(1, 1, 1),
@@ -1129,25 +1127,6 @@ class PDFClickCounter:
                     )
 
             shape.commit()
-
-            # Sequence numbers drawn on top of the circles
-            for cat_idx, cat in enumerate(self.categories):
-                cat_clicks  = self.clicks.get(cat_idx, {})
-                prior       = sum(len(cat_clicks.get(pg, [])) for pg in range(page_idx))
-                page_clicks = cat_clicks.get(page_idx, [])
-
-                for local_idx, (pdf_x, pdf_y) in enumerate(page_clicks):
-                    seq  = prior + local_idx + 1
-                    rect = fitz.Rect(
-                        pdf_x - radius_pt, pdf_y - radius_pt,
-                        pdf_x + radius_pt, pdf_y + radius_pt,
-                    )
-                    page.insert_textbox(
-                        rect, str(seq),
-                        fontsize=text_size,
-                        color=(1, 1, 1),
-                        align=fitz.TEXT_ALIGN_CENTER,
-                    )
 
         try:
             out_doc.save(save_path, garbage=3, deflate=True)
@@ -1352,16 +1331,18 @@ if __name__ == "__main__":
     root = tk.Tk()
     _dir = os.path.dirname(os.path.abspath(__file__))
     try:
-        if sys.platform == "win32":
+        png_path = os.path.join(_dir, "icon.png")
+        if os.path.isfile(png_path):
+            _icon = tk.PhotoImage(file=png_path)
+            root.iconphoto(True, _icon)
+    except Exception:
+        pass
+    if sys.platform == "win32":
+        try:
             ico_path = os.path.join(_dir, "icon.ico")
             if os.path.isfile(ico_path):
                 root.iconbitmap(ico_path)
-        else:
-            png_path = os.path.join(_dir, "icon.png")
-            if os.path.isfile(png_path):
-                _icon = tk.PhotoImage(file=png_path)
-                root.iconphoto(True, _icon)
-    except Exception:
-        pass
+        except Exception:
+            pass
     app  = PDFClickCounter(root)
     root.mainloop()
