@@ -90,8 +90,7 @@ class PDFClickCounter:
         self._pan_key_held: bool = False
         self.pan_mode: bool = False
         self.erase_mode: bool = False
-        self.move_mode: bool = False
-        self._move_target: tuple | None = None  # (cat_idx, page_idx, click_idx)
+        self._move_target: tuple | None = None  # (cat_idx, page_idx, click_idx) being dragged
 
         # Ruler state
         self.ruler_mode: bool = False
@@ -166,11 +165,6 @@ class PDFClickCounter:
         self.ruler_btn.pack(side=tk.LEFT, padx=2)
         self.marker_btn = tk.Button(toolbar, text="🔢", command=self.activate_marker_mode, **btn_cfg)
         self.marker_btn.pack(side=tk.LEFT, padx=2)
-        self.erase_btn = tk.Button(toolbar, text="✕ Erase", command=self.toggle_erase_mode, **btn_cfg)
-        self.erase_btn.pack(side=tk.LEFT, padx=2)
-        self.move_btn = tk.Button(toolbar, text="↔ Move", command=self.toggle_move_mode, **btn_cfg)
-        self.move_btn.pack(side=tk.LEFT, padx=2)
-
         tk.Frame(toolbar, bg="#45475a", width=1).pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=3)
 
         # Category controls
@@ -555,14 +549,11 @@ class PDFClickCounter:
                 self.status_var.set("No marker found here — click directly on a marker to erase it.")
             return
 
-        # ── Move mode — select on press; drag/release handled by motion binding ─
-        if self.move_mode:
-            hit = self._find_nearest_marker(cx, cy)
-            if hit:
-                self._move_target = hit
-                self._redraw_markers_only()
-            else:
-                self.status_var.set("No marker found — click and drag a marker to reposition it.")
+        # ── Click on existing marker → drag to reposition instead of adding a count ─
+        hit = self._find_nearest_marker(cx, cy)
+        if hit:
+            self._move_target = hit
+            self._redraw_markers_only()
             return
 
         # Distance guard across ALL categories (avoid stacking markers)
@@ -602,9 +593,6 @@ class PDFClickCounter:
             mode = "📏 RULER"
         elif self.erase_mode:
             mode = "✕ ERASE — click a marker to delete"
-        elif self.move_mode:
-            mode = ("↔ MOVE — dragging…" if self._move_target is not None
-                    else "↔ MOVE — click and drag a marker")
         else:
             mode = f"[{cat_name}]"
         self.status_var.set(f"{mode}  zoom: {self.zoom:.1f}×")
@@ -689,17 +677,15 @@ class PDFClickCounter:
     def activate_marker_mode(self):
         self.pan_mode   = False
         self.erase_mode = False
-        if self.move_mode:
-            self.move_mode    = False
-            self._move_target = None
+        self._move_target = None
         if self.ruler_mode:
             self.ruler_mode = False
             self.ruler_bar.pack_forget()
-        self.canvas.config(cursor="target")
+        self.canvas.config(cursor="crosshair")
         self._refresh_tool_buttons()
 
     def _refresh_tool_buttons(self):
-        marker_active = not self.pan_mode and not self.ruler_mode and not self.erase_mode and not self.move_mode
+        marker_active = not self.pan_mode and not self.ruler_mode and not self.erase_mode
         self.marker_btn.config(
             relief=tk.SUNKEN if marker_active else tk.FLAT,
             bg="#45475a" if marker_active else "#313244",
@@ -711,14 +697,6 @@ class PDFClickCounter:
         self.ruler_btn.config(
             relief=tk.SUNKEN if self.ruler_mode else tk.FLAT,
             bg="#45475a" if self.ruler_mode else "#313244",
-        )
-        self.erase_btn.config(
-            relief=tk.SUNKEN if self.erase_mode else tk.FLAT,
-            bg="#45475a" if self.erase_mode else "#313244",
-        )
-        self.move_btn.config(
-            relief=tk.SUNKEN if self.move_mode else tk.FLAT,
-            bg="#45475a" if self.move_mode else "#313244",
         )
 
     def toggle_pan_mode(self):
@@ -738,13 +716,25 @@ class PDFClickCounter:
         if self.ruler_mode:
             self.toggle_ruler_mode()
             return
+        # Two-finger tap on macOS fires Button-2. In count or move mode, erase
+        # the marker under the cursor instead of starting a pan.
+        if not self.pan_mode:
+            cx = self.canvas.canvasx(event.x)
+            cy = self.canvas.canvasy(event.y)
+            hit = self._find_nearest_marker(cx, cy)
+            if hit:
+                cat_idx, pg, idx = hit
+                self.clicks[cat_idx][pg].pop(idx)
+                self._move_target = None
+                self.render_page()
+                return
         self.canvas.scan_mark(event.x, event.y)
 
     def _pan_move(self, event):
         self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_b1_motion(self, event):
-        if self.move_mode and self._move_target is not None:
+        if self._move_target is not None:
             cx = self.canvas.canvasx(event.x)
             cy = self.canvas.canvasy(event.y)
             cat_idx, pg, idx = self._move_target
@@ -758,7 +748,7 @@ class PDFClickCounter:
             self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_b1_release(self, _):
-        if self.move_mode and self._move_target is not None:
+        if self._move_target is not None:
             self._move_target = None
             self._redraw_markers_only()   # clear the yellow highlight
 
@@ -780,14 +770,25 @@ class PDFClickCounter:
         self._draw_ruler()
         self._update_status()
 
-    def _on_right_click(self, _):
+    def _on_right_click(self, event):
+        # Cancel any in-progress drag first
+        if self._move_target is not None:
+            self._move_target = None
+            self._redraw_markers_only()
+            return
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
         if self.ruler_mode:
             self.toggle_ruler_mode()
         elif self.erase_mode:
             self.toggle_erase_mode()
-        elif self.move_mode:
-            self._move_target = None
-            self.toggle_move_mode()
+        elif not self.pan_mode:
+            # count mode — right-click on a marker deletes it
+            hit = self._find_nearest_marker(cx, cy)
+            if hit:
+                cat_idx, pg, idx = hit
+                self.clicks[cat_idx][pg].pop(idx)
+                self.render_page()
         elif self.pan_mode:
             self.toggle_pan_mode()
 
@@ -812,28 +813,12 @@ class PDFClickCounter:
     def toggle_erase_mode(self):
         self.erase_mode = not self.erase_mode
         if self.erase_mode:
-            self.pan_mode  = False
-            self.move_mode = False
+            self.pan_mode     = False
             self._move_target = None
             if self.ruler_mode:
                 self.ruler_mode = False
                 self.ruler_bar.pack_forget()
             self.canvas.config(cursor="X_cursor")
-        self._refresh_tool_buttons()
-        self._update_status()
-
-    def toggle_move_mode(self):
-        self.move_mode = not self.move_mode
-        if self.move_mode:
-            self.pan_mode   = False
-            self.erase_mode = False
-            if self.ruler_mode:
-                self.ruler_mode = False
-                self.ruler_bar.pack_forget()
-            self.canvas.config(cursor="center_ptr")
-        else:
-            self._move_target = None
-            self.render_page()
         self._refresh_tool_buttons()
         self._update_status()
 

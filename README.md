@@ -11,6 +11,8 @@ Concept & feedback by **HDZ Electrical**
 
 - **Pan & Marker tools** — open a plan, explore it with Pan, then switch to Marker mode to start counting
 - **Click to count** — click anywhere on the PDF to place a numbered marker
+- **Move markers** — in Marker mode, click and drag any existing marker to reposition it
+- **Erase markers** — right-click a marker (or two-finger tap on a trackpad) to delete it in Marker mode; in Pan mode, switch tools first
 - **Categories** — create multiple named categories, each with a unique colour; markers from all categories are visible at the same time
 - **Ruler tool** — measure distances between two points; set a plan scale (e.g. `1:200`) to get results in metres
 - **Zoom** — zoom in/out with buttons or `Ctrl + scroll`; markers stay anchored to their exact position in the PDF
@@ -50,8 +52,8 @@ python click2count.py
 
 1. Click **☰ → Open PDF** to load a file — the view opens in **Pan mode** automatically
 2. Pan around the plan to orient yourself
-3. Click **✏ Marker** in the toolbar to switch to counting mode
-4. Click anywhere on the plan to place numbered markers
+3. Click **🔢** in the toolbar to switch to counting mode
+4. Click anywhere on the plan to place markers
 5. Right-click to exit the active tool at any time
 
 ### Categories
@@ -72,6 +74,26 @@ Switch the active category from the dropdown — new clicks go to the selected c
 | **✋** | Click the Pan button, or hold `D` + drag (temporary), or middle-click drag |
 | **📏** | Click the Ruler button — a second toolbar row appears |
 | Exit any tool | **Right-click** |
+
+### Moving markers
+
+While in Marker mode (**🔢**), click and drag any existing marker to reposition it:
+
+1. Click on a marker — it fades to indicate it is selected
+2. Drag to the new position
+3. Release to drop it
+
+Right-click during a drag cancels the move.
+
+### Erasing markers
+
+| Action | Result |
+|--------|--------|
+| Right-click a marker (Marker mode) | Deletes the marker immediately |
+| Two-finger tap a marker (trackpad, Marker mode) | Deletes the marker immediately |
+| **Undo** button or `z` | Removes the most recently placed marker for the active category |
+| **🗑 Reset** button | Clears all markers on the current page for the active category |
+| **Clear page** button | Clears all markers on the current page across all categories |
 
 ### Ruler
 
