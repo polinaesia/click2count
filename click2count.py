@@ -375,7 +375,7 @@ class PDFClickCounter:
             return
         price = simpledialog.askfloat(
             "Category Price",
-            f"Price (excl GST) for '{name}':",
+            f"Price (exc GST) for '{name}':",
             initialvalue=0.0,
             minvalue=0.0,
             parent=self.root,
@@ -414,11 +414,24 @@ class PDFClickCounter:
         name_entry.focus_set()
         name_entry.select_range(0, tk.END)
 
-        tk.Label(dlg, text="Price (excl GST):", bg="#1e1e2e", fg="#a6adc8",
+        tk.Label(dlg, text="Price (exc GST):", bg="#1e1e2e", fg="#a6adc8",
                  font=("Courier", 10)).pack(pady=(0, 2))
         price_var = tk.StringVar(value=f'{cat.get("price", 0.0):.2f}')
-        price_entry = tk.Entry(dlg, textvariable=price_var, **entry_cfg)
+
+        def _validate_price(proposed: str) -> bool:
+            if proposed in ("", "."):
+                return True
+            if proposed.count(".") > 1:
+                return False
+            return all(ch.isdigit() or ch == "." for ch in proposed)
+
+        vcmd = (dlg.register(_validate_price), "%P")
+        price_entry = tk.Entry(dlg, textvariable=price_var, validate="key",
+                               validatecommand=vcmd, **entry_cfg)
         price_entry.pack(pady=(0, 14))
+        # Selecting the placeholder value means the first digit typed
+        # replaces it, instead of the user having to delete "0.00" by hand.
+        price_entry.bind("<FocusIn>", lambda _: price_entry.select_range(0, tk.END))
 
         def apply_and_close():
             new_name = name_var.get().strip()
@@ -445,7 +458,7 @@ class PDFClickCounter:
         btn_row = tk.Frame(dlg, bg="#1e1e2e")
         btn_row.pack(pady=(0, 12))
         tk.Button(btn_row, text="OK",     command=apply_and_close, **btn_cfg).pack(side=tk.LEFT, padx=6)
-        tk.Button(btn_row, text="Cancel", command=dlg.destroy,     **btn_cfg).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_row, text="Skip", command=dlg.destroy,     **btn_cfg).pack(side=tk.LEFT, padx=6)
 
         name_entry.bind("<Return>", lambda _: price_entry.focus_set())
         price_entry.bind("<Return>", lambda _: apply_and_close())
@@ -1100,7 +1113,7 @@ class PDFClickCounter:
         messagebox.showinfo("Export", f"Summary saved to:\n{save_path}")
 
     def _export_xlsx(self, path: str):
-        from openpyxl.styles import Border, Side
+        from openpyxl.styles import Border, Font, Side
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -1109,13 +1122,15 @@ class PDFClickCounter:
         currency_fmt = '#,##0.00'
         thin = Side(style="thin")
         all_borders = Border(left=thin, right=thin, top=thin, bottom=thin)
+        bold_font = Font(bold=True)
 
         # Column layout: A Item | B Quantity | C Price (excl GST) | D Total
         ITEM_COL, QTY_COL, PRICE_COL, TOTAL_COL = 1, 2, 3, 4
 
-        headers = ["Item", "Quantity", "Price (excl GST)", "Total"]
+        headers = ["Item", "Quantity", "Price (exc GST)", "Total"]
         for col, title in enumerate(headers, 1):
-            ws.cell(row=1, column=col, value=title)
+            cell = ws.cell(row=1, column=col, value=title)
+            cell.font = bold_font
 
         # ── One row per category ──────────────────────────────────────────────
         first_data_row = 2
@@ -1137,8 +1152,8 @@ class PDFClickCounter:
 
         last_data_row = first_data_row + len(self.categories) - 1
 
-        # ── Grand totals ─────────────────────────────────────────────────────
-        excl_gst_row = last_data_row + 1
+        # ── Grand totals (two blank rows separate them from the items) ───────
+        excl_gst_row = last_data_row + 3
         incl_gst_row = excl_gst_row + 1
 
         ws.cell(row=excl_gst_row, column=ITEM_COL, value="Total excl GST")
@@ -1148,15 +1163,18 @@ class PDFClickCounter:
         )
         excl_cell.number_format = currency_fmt
 
-        ws.cell(row=incl_gst_row, column=ITEM_COL, value="Total incl GST")
+        ws.cell(row=incl_gst_row, column=ITEM_COL, value="Total inc GST")
         incl_cell = ws.cell(
             row=incl_gst_row, column=TOTAL_COL,
             value=f"=D{excl_gst_row}*{1 + GST_RATE}",
         )
         incl_cell.number_format = currency_fmt
 
-        # ── Borders around the whole table (header + data + total rows) ──────
-        for row in ws.iter_rows(min_row=1, max_row=incl_gst_row, min_col=1, max_col=TOTAL_COL):
+        # ── Borders: header+data block and the totals block, blank rows left bare ─
+        for row in ws.iter_rows(min_row=1, max_row=last_data_row, min_col=1, max_col=TOTAL_COL):
+            for cell in row:
+                cell.border = all_borders
+        for row in ws.iter_rows(min_row=excl_gst_row, max_row=incl_gst_row, min_col=1, max_col=TOTAL_COL):
             for cell in row:
                 cell.border = all_borders
 
