@@ -58,6 +58,7 @@ MIN_DISTANCE_PX = 10
 DEFAULT_ZOOM    = 1.5
 MARKER_RADIUS   = 10     # doubled from original 10
 MARKER_ALPHA    = int(0.6 * 255)  # 153
+GST_RATE        = 0.10   # Australian GST
 
 # ── Main Application ──────────────────────────────────────────────────────────
 
@@ -77,8 +78,8 @@ class PDFClickCounter:
         self.page_offset_x = 0
         self.page_offset_y = 0
 
-        # Categories: list of {"name": str, "color": "#rrggbb"}
-        self.categories: list[dict] = [{"name": "Category 1", "color": "#e63946"}]
+        # Categories: list of {"name": str, "color": "#rrggbb", "price": float}
+        self.categories: list[dict] = [{"name": "Category 1", "color": "#e63946", "price": 0.0}]
         self.current_category: int = 0
 
         # clicks[cat_idx][page_idx] = [(pdf_x, pdf_y), ...]  (PDF coords, zoom-independent)
@@ -140,7 +141,7 @@ class PDFClickCounter:
         self._file_menu.add_command(label="💾  Save Session",   command=self.save_session)
         self._file_menu.add_command(label="📂  Load Session",   command=self.load_session)
         self._file_menu.add_separator()
-        self._file_menu.add_command(label="📊  Export Summary",    command=self.export_summary)
+        self._file_menu.add_command(label="📊  Export Quote",    command=self.export_summary)
         self._file_menu.add_command(label="📄  Export PDF", command=self.export_marked_pdf)
         self._file_menu.add_separator()
         self._file_menu.add_command(label="ℹ️   About",             command=self._show_about)
@@ -184,9 +185,9 @@ class PDFClickCounter:
         self.cat_color_swatch.pack(side=tk.LEFT, padx=(2, 4))
         self.cat_color_swatch.bind("<Button-1>", lambda _: self.change_category_color())
 
-        tk.Button(toolbar, text="＋",        command=self.add_category,   **btn_cfg).pack(side=tk.LEFT, padx=1)
-        tk.Button(toolbar, text="✎ Rename", command=self.rename_category, **btn_cfg).pack(side=tk.LEFT, padx=1)
-        tk.Button(toolbar, text="🗑 Reset",  command=self.reset_page,      **btn_cfg).pack(side=tk.LEFT, padx=1)
+        tk.Button(toolbar, text="＋",       command=self.add_category,   **btn_cfg).pack(side=tk.LEFT, padx=1)
+        tk.Button(toolbar, text="✎ Edit",  command=self.edit_category,  **btn_cfg).pack(side=tk.LEFT, padx=1)
+        tk.Button(toolbar, text="🗑 Reset", command=self.reset_page,     **btn_cfg).pack(side=tk.LEFT, padx=1)
 
         self._refresh_category_menu()
 
@@ -372,21 +373,82 @@ class PDFClickCounter:
         result = colorchooser.askcolor(title=f"Choose colour for '{name}'", parent=self.root)
         if not result or not result[1]:
             return
+        price = simpledialog.askfloat(
+            "Category Price",
+            f"Price (excl GST) for '{name}':",
+            initialvalue=0.0,
+            minvalue=0.0,
+            parent=self.root,
+        )
+        if price is None:
+            price = 0.0
         cat_idx = len(self.categories)
-        self.categories.append({"name": name, "color": result[1]})
+        self.categories.append({"name": name, "color": result[1], "price": price})
         self.clicks[cat_idx] = {}
         self.current_category = cat_idx
         self._refresh_category_menu()
         self._update_status()
 
-    def rename_category(self):
+    def edit_category(self):
         cat = self.categories[self.current_category]
-        new_name = simpledialog.askstring(
-            "Rename Category", "New name:", initialvalue=cat["name"], parent=self.root
-        )
-        if new_name:
-            cat["name"] = new_name
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Edit Category")
+        dlg.configure(bg="#1e1e2e")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        self.root.update_idletasks()
+        x = self.root.winfo_rootx() + self.root.winfo_width()  // 2 - 160
+        y = self.root.winfo_rooty() + self.root.winfo_height() // 2 - 95
+        dlg.geometry(f"320x190+{x}+{y}")
+
+        entry_cfg = dict(bg="#313244", fg="#a6adc8", insertbackground="#a6adc8",
+                          relief=tk.FLAT, font=("Courier", 10), width=24)
+
+        tk.Label(dlg, text="Category name:", bg="#1e1e2e", fg="#a6adc8",
+                 font=("Courier", 10)).pack(pady=(16, 2))
+        name_var = tk.StringVar(value=cat["name"])
+        name_entry = tk.Entry(dlg, textvariable=name_var, **entry_cfg)
+        name_entry.pack(pady=(0, 10))
+        name_entry.focus_set()
+        name_entry.select_range(0, tk.END)
+
+        tk.Label(dlg, text="Price (excl GST):", bg="#1e1e2e", fg="#a6adc8",
+                 font=("Courier", 10)).pack(pady=(0, 2))
+        price_var = tk.StringVar(value=f'{cat.get("price", 0.0):.2f}')
+        price_entry = tk.Entry(dlg, textvariable=price_var, **entry_cfg)
+        price_entry.pack(pady=(0, 14))
+
+        def apply_and_close():
+            new_name = name_var.get().strip()
+            try:
+                new_price = float(price_var.get().strip().replace(",", "."))
+                if new_price < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid price",
+                    "Enter a valid non-negative number for the price.",
+                    parent=dlg,
+                )
+                return
+            if new_name:
+                cat["name"] = new_name
+            cat["price"] = new_price
             self._refresh_category_menu()
+            dlg.destroy()
+
+        btn_cfg = dict(bg="#313244", fg="#a6adc8", activebackground="#45475a",
+                       activeforeground="#2569F2", relief=tk.FLAT,
+                       padx=14, pady=4, cursor="hand2", font=("Courier", 10))
+        btn_row = tk.Frame(dlg, bg="#1e1e2e")
+        btn_row.pack(pady=(0, 12))
+        tk.Button(btn_row, text="OK",     command=apply_and_close, **btn_cfg).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy,     **btn_cfg).pack(side=tk.LEFT, padx=6)
+
+        name_entry.bind("<Return>", lambda _: price_entry.focus_set())
+        price_entry.bind("<Return>", lambda _: apply_and_close())
 
     def change_category_color(self):
         cat = self.categories[self.current_category]
@@ -1038,40 +1100,73 @@ class PDFClickCounter:
         messagebox.showinfo("Export", f"Summary saved to:\n{save_path}")
 
     def _export_xlsx(self, path: str):
+        from openpyxl.styles import Border, Side
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Summary"
 
-        # Collect all page numbers that have any clicks
-        all_pages = sorted({
-            pg
-            for cat_clicks in self.clicks.values()
-            for pg, coords in cat_clicks.items()
-            if coords
-        })
+        currency_fmt = '#,##0.00'
+        thin = Side(style="thin")
+        all_borders = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-        total_col = len(all_pages) + 2  # column index for the Total column
+        # Column layout: A Item | B Quantity | C Price (excl GST) | D Total
+        ITEM_COL, QTY_COL, PRICE_COL, TOTAL_COL = 1, 2, 3, 4
 
-        # ── Header row ───────────────────────────────────────────────────────
-        headers = ["Category"] + [f"Page {pg + 1}" for pg in all_pages] + ["Total"]
+        headers = ["Item", "Quantity", "Price (excl GST)", "Total"]
         for col, title in enumerate(headers, 1):
             ws.cell(row=1, column=col, value=title)
 
         # ── One row per category ──────────────────────────────────────────────
-        for row_idx, (i, cat) in enumerate(enumerate(self.categories), 2):
+        first_data_row = 2
+        for row_idx, (i, cat) in enumerate(enumerate(self.categories), first_data_row):
             cat_clicks = self.clicks.get(i, {})
-            ws.cell(row=row_idx, column=1, value=cat["name"])
-            for col_idx, pg in enumerate(all_pages, 2):
-                ws.cell(row=row_idx, column=col_idx, value=len(cat_clicks.get(pg, [])))
-            ws.cell(row=row_idx, column=total_col,
-                    value=sum(len(v) for v in cat_clicks.values()))
+            qty = sum(len(v) for v in cat_clicks.values())
+
+            ws.cell(row=row_idx, column=ITEM_COL, value=cat["name"])
+            ws.cell(row=row_idx, column=QTY_COL, value=qty)
+
+            price_cell = ws.cell(row=row_idx, column=PRICE_COL, value=cat.get("price", 0.0))
+            price_cell.number_format = currency_fmt
+
+            total_cell = ws.cell(
+                row=row_idx, column=TOTAL_COL,
+                value=f"=B{row_idx}*C{row_idx}",
+            )
+            total_cell.number_format = currency_fmt
+
+        last_data_row = first_data_row + len(self.categories) - 1
+
+        # ── Grand totals ─────────────────────────────────────────────────────
+        excl_gst_row = last_data_row + 1
+        incl_gst_row = excl_gst_row + 1
+
+        ws.cell(row=excl_gst_row, column=ITEM_COL, value="Total excl GST")
+        excl_cell = ws.cell(
+            row=excl_gst_row, column=TOTAL_COL,
+            value=f"=SUM(D{first_data_row}:D{last_data_row})",
+        )
+        excl_cell.number_format = currency_fmt
+
+        ws.cell(row=incl_gst_row, column=ITEM_COL, value="Total incl GST")
+        incl_cell = ws.cell(
+            row=incl_gst_row, column=TOTAL_COL,
+            value=f"=D{excl_gst_row}*{1 + GST_RATE}",
+        )
+        incl_cell.number_format = currency_fmt
+
+        # ── Borders around the whole table (header + data + total rows) ──────
+        for row in ws.iter_rows(min_row=1, max_row=incl_gst_row, min_col=1, max_col=TOTAL_COL):
+            for cell in row:
+                cell.border = all_borders
 
         # ── Column widths ────────────────────────────────────────────────────
         ws.column_dimensions["A"].width = max(
             14, max((len(c["name"]) for c in self.categories), default=10) + 2
         )
-        for col_idx in range(2, total_col + 1):
-            ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 10
+        ws.column_dimensions["B"].width = 10
+        ws.column_dimensions["C"].width = 16
+        ws.column_dimensions["D"].width = 16
 
         wb.save(path)
 
@@ -1201,7 +1296,9 @@ class PDFClickCounter:
         self.current_page  = data.get("current_page", 0)
         self.zoom          = data.get("zoom", DEFAULT_ZOOM)
         self.scale_m_per_pt = data.get("scale_m_per_pt")
-        self.categories    = data.get("categories", [{"name": "Category 1", "color": "#e63946"}])
+        self.categories    = data.get("categories", [{"name": "Category 1", "color": "#e63946", "price": 0.0}])
+        for cat in self.categories:
+            cat.setdefault("price", 0.0)
 
         raw_clicks = data.get("clicks", {})
         self.clicks = {
