@@ -458,7 +458,7 @@ class PDFClickCounter:
         btn_row = tk.Frame(dlg, bg="#1e1e2e")
         btn_row.pack(pady=(0, 12))
         tk.Button(btn_row, text="OK",     command=apply_and_close, **btn_cfg).pack(side=tk.LEFT, padx=6)
-        tk.Button(btn_row, text="Skip", command=dlg.destroy,     **btn_cfg).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy,     **btn_cfg).pack(side=tk.LEFT, padx=6)
 
         name_entry.bind("<Return>", lambda _: price_entry.focus_set())
         price_entry.bind("<Return>", lambda _: apply_and_close())
@@ -1095,7 +1095,7 @@ class PDFClickCounter:
 
         else:
             lines = [
-                "PDF Click Counter — Summary",
+                "Click2Count — Summary",
                 f"File: {self.pdf_path}",
                 "",
             ]
@@ -1124,7 +1124,7 @@ class PDFClickCounter:
         all_borders = Border(left=thin, right=thin, top=thin, bottom=thin)
         bold_font = Font(bold=True)
 
-        # Column layout: A Item | B Quantity | C Price (excl GST) | D Total
+        # Column layout: A Item | B Quantity | C Price (exc GST) | D Total
         ITEM_COL, QTY_COL, PRICE_COL, TOTAL_COL = 1, 2, 3, 4
 
         headers = ["Item", "Quantity", "Price (exc GST)", "Total"]
@@ -1152,29 +1152,30 @@ class PDFClickCounter:
 
         last_data_row = first_data_row + len(self.categories) - 1
 
-        # ── Grand totals (two blank rows separate them from the items) ───────
-        excl_gst_row = last_data_row + 3
+        # ── Grand totals (one blan row separate them from the items) ───────
+        excl_gst_row = last_data_row + 2
         incl_gst_row = excl_gst_row + 1
 
-        ws.cell(row=excl_gst_row, column=ITEM_COL, value="Total excl GST")
+        total_cell = ws.cell(row=excl_gst_row, column=ITEM_COL, value="Total exc GST")
+        total_cell.font = bold_font
         excl_cell = ws.cell(
             row=excl_gst_row, column=TOTAL_COL,
             value=f"=SUM(D{first_data_row}:D{last_data_row})",
         )
         excl_cell.number_format = currency_fmt
+        excl_cell.font = bold_font
 
-        ws.cell(row=incl_gst_row, column=ITEM_COL, value="Total inc GST")
+        total_cell = ws.cell(row=incl_gst_row, column=ITEM_COL, value="Total inc GST")
+        total_cell.font = bold_font
         incl_cell = ws.cell(
             row=incl_gst_row, column=TOTAL_COL,
             value=f"=D{excl_gst_row}*{1 + GST_RATE}",
         )
         incl_cell.number_format = currency_fmt
+        incl_cell.font = bold_font
 
         # ── Borders: header+data block and the totals block, blank rows left bare ─
-        for row in ws.iter_rows(min_row=1, max_row=last_data_row, min_col=1, max_col=TOTAL_COL):
-            for cell in row:
-                cell.border = all_borders
-        for row in ws.iter_rows(min_row=excl_gst_row, max_row=incl_gst_row, min_col=1, max_col=TOTAL_COL):
+        for row in ws.iter_rows(min_row=1, max_row=incl_gst_row, min_col=1, max_col=TOTAL_COL):
             for cell in row:
                 cell.border = all_borders
 
@@ -1190,7 +1191,7 @@ class PDFClickCounter:
 
     def export_marked_pdf(self):
         if self.pdf_doc is None or not self.pdf_path:
-            messagebox.showinfo("Export Marked PDF", "No PDF is open.")
+            messagebox.showinfo("Export PDF", "No PDF is open.")
             return
         has_clicks = any(
             len(pg) > 0
@@ -1198,14 +1199,14 @@ class PDFClickCounter:
             for pg in cat.values()
         )
         if not has_clicks:
-            messagebox.showinfo("Export Marked PDF", "No markers to export.")
+            messagebox.showinfo("Export PDF", "No markers to export.")
             return
 
         base = os.path.splitext(os.path.basename(self.pdf_path))[0]
         save_path = filedialog.asksaveasfilename(
             defaultextension=".pdf",
             filetypes=[("PDF file", "*.pdf"), ("All files", "*.*")],
-            title="Export Marked PDF",
+            title="Export PDF",
             initialfile=f"{base}_marked",
         )
         if not save_path:
