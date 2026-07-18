@@ -1262,9 +1262,21 @@ class PDFClickCounter:
         if not save_path:
             return
 
+        pdf_rel_path = None
+        if self.pdf_path:
+            try:
+                pdf_rel_path = os.path.relpath(
+                    os.path.abspath(self.pdf_path),
+                    os.path.dirname(os.path.abspath(save_path)),
+                )
+            except ValueError:
+                pdf_rel_path = None  # e.g. different drives on Windows
+
         data = {
-            "version":       1,
+            "version":       2,
             "pdf_path":      self.pdf_path,
+            "pdf_rel_path":  pdf_rel_path,
+            "pdf_filename":  os.path.basename(self.pdf_path) if self.pdf_path else "",
             "current_page":  self.current_page,
             "zoom":          self.zoom,
             "scale_m_per_pt": self.scale_m_per_pt,
@@ -1281,6 +1293,38 @@ class PDFClickCounter:
             json.dump(data, f, indent=2)
         messagebox.showinfo("Session Saved", f"Session saved to:\n{save_path}")
 
+    def _resolve_pdf_path(self, data: dict, load_path: str) -> str:
+        """Find the PDF a session refers to, tolerating a different machine/mount point.
+
+        Sessions store the PDF's path relative to the .c2c file itself, since a
+        Google-Drive-synced folder keeps the same relative layout on every
+        device even though the absolute path differs. Older session files only
+        have an absolute path, so that (and a basename search) are kept as
+        fallbacks.
+        """
+        session_dir = os.path.dirname(os.path.abspath(load_path))
+
+        rel_path = data.get("pdf_rel_path")
+        if rel_path:
+            candidate = os.path.normpath(os.path.join(session_dir, rel_path))
+            if os.path.isfile(candidate):
+                return candidate
+
+        abs_path = data.get("pdf_path", "")
+        if abs_path and os.path.isfile(abs_path):
+            return abs_path
+
+        filename = data.get("pdf_filename") or (os.path.basename(abs_path) if abs_path else "")
+        if filename:
+            direct = os.path.join(session_dir, filename)
+            if os.path.isfile(direct):
+                return direct
+            for root, _dirs, files in os.walk(session_dir):
+                if filename in files:
+                    return os.path.join(root, filename)
+
+        return ""
+
     def load_session(self):
         load_path = filedialog.askopenfilename(
             filetypes=[("Click2Count session", "*.c2c"), ("All files", "*.*")],
@@ -1296,14 +1340,33 @@ class PDFClickCounter:
             messagebox.showerror("Error", f"Could not read session file:\n{exc}")
             return
 
-        pdf_path = data.get("pdf_path", "")
-        if pdf_path and not os.path.isfile(pdf_path):
-            messagebox.showerror(
+        original_ref = data.get("pdf_path") or data.get("pdf_filename") or ""
+        pdf_path = self._resolve_pdf_path(data, load_path) if original_ref else ""
+
+        if not pdf_path and original_ref:
+            if messagebox.askyesno(
                 "PDF not found",
-                f"The session references a PDF that cannot be found:\n{pdf_path}\n\n"
-                "Move the PDF back to its original location and try again.",
+                f"Could not find the PDF this session refers to:\n{original_ref}\n\n"
+                "Locate it manually?",
+            ):
+                pdf_path = filedialog.askopenfilename(
+                    title="Locate PDF",
+                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                )
+            if not pdf_path:
+                return
+            # Fix the session in place so future loads (on any synced device)
+            # resolve the relative path automatically.
+            data["pdf_path"] = pdf_path
+            data["pdf_rel_path"] = os.path.relpath(
+                os.path.abspath(pdf_path), os.path.dirname(os.path.abspath(load_path))
             )
-            return
+            data["pdf_filename"] = os.path.basename(pdf_path)
+            try:
+                with open(load_path, "w") as f:
+                    json.dump(data, f, indent=2)
+            except Exception:
+                pass
 
         try:
             self.pdf_doc = fitz.open(pdf_path) if pdf_path else None
